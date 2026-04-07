@@ -336,6 +336,37 @@
             display: block;
         }
 
+        /* Tambahan CSS untuk Input Manual */
+        .manual-input-container {
+            margin-top: 15px;
+            border-top: 2px dashed #eee;
+            padding-top: 15px;
+        }
+
+        .manual-input-container h3 {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        #manual-input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 14px;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+
+        #manual-input:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+        }
+
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -363,7 +394,6 @@
             <p>Setelah di scan semua pergi scan satu persatu di Program PriceTag Komputer</p>
         </div>
 
-        <!-- Scanner Section -->
         <div id="scanner-section" class="card">
             <div class="scanner-container">
                 <div id="scanner"></div>
@@ -407,9 +437,16 @@
                     📋 Tampilkan Hasil
                 </button>
             </div>
+
+            <div class="manual-input-container">
+                <h3>📝 Input Manual PLU / Barcode</h3>
+                <textarea id="manual-input" rows="4" placeholder="Contoh: 10003557, 20091271&#10;Bisa dipisah dengan koma, titik, spasi, atau enter..."></textarea>
+                <button class="btn btn-primary" id="process-manual" style="width: 100%; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);">
+                    ➕ Tambahkan ke Daftar
+                </button>
+            </div>
         </div>
 
-        <!-- Results Section -->
         <div id="results-section" class="results-container">
             <div class="navigation">
                 <button class="nav-btn" id="prev-page" disabled>‹ Sebelumnya</button>
@@ -431,7 +468,6 @@
         </button>
     </div>
 
-    <!-- Modal -->
     <div id="modal" class="modal">
         <div class="modal-content">
             <h3>⚠️ Konfirmasi</h3>
@@ -478,11 +514,15 @@
                         throw new Error('Format data JSON tidak valid');
                     }
                     
-                    // Buat index barcode untuk pencarian cepat
+                    // Buat index barcode & PLU untuk pencarian cepat
                     this.barcodeIndex = {};
+                    this.pluIndex = {};
                     this.products.forEach(product => {
                         if (product.BARCODE) {
                             this.barcodeIndex[product.BARCODE] = product;
+                        }
+                        if (product.PLU) {
+                            this.pluIndex[product.PLU] = product;
                         }
                     });
                     
@@ -501,9 +541,13 @@
                     ];
                     
                     this.barcodeIndex = {};
+                    this.pluIndex = {};
                     this.products.forEach(product => {
                         if (product.BARCODE) {
                             this.barcodeIndex[product.BARCODE] = product;
+                        }
+                        if (product.PLU) {
+                            this.pluIndex[product.PLU] = product;
                         }
                     });
                     
@@ -519,6 +563,9 @@
                 document.getElementById('show-results').addEventListener('click', () => this.showResults());
                 document.getElementById('back-to-scanner').addEventListener('click', () => this.backToScanner());
                 
+                // Event listener untuk tombol input manual
+                document.getElementById('process-manual').addEventListener('click', () => this.processManualInput());
+                
                 document.getElementById('confirm-cancel').addEventListener('click', () => this.confirmCancel());
                 document.getElementById('keep-scanning').addEventListener('click', () => this.hideCancelModal());
                 
@@ -530,6 +577,55 @@
                 document.getElementById('modal').addEventListener('click', (e) => {
                     if (e.target.id === 'modal') this.hideCancelModal();
                 });
+            }
+
+            processManualInput() {
+                const inputEl = document.getElementById('manual-input');
+                const text = inputEl.value;
+                
+                // Gunakan Regex \d+ untuk mengambil SEMUA kumpulan angka, 
+                // otomatis mengabaikan koma, spasi, titik, huruf, atau enter
+                const codes = text.match(/\d+/g);
+                
+                if (!codes || codes.length === 0) {
+                    this.showMessage('Tidak ada angka valid yang ditemukan di kotak input', 'error');
+                    return;
+                }
+                
+                let addedCount = 0;
+                let duplicateCount = 0;
+                
+                codes.forEach(code => {
+                    let barcodeToUse = code;
+                    
+                    // Cek apakah angka yang diinput adalah PLU, jika iya, ambil barcodenya
+                    if (this.pluIndex && this.pluIndex[code] && this.pluIndex[code].BARCODE) {
+                        barcodeToUse = this.pluIndex[code].BARCODE;
+                    }
+                    
+                    // Cek apakah sudah pernah discan/diinput
+                    if (!this.scannedBarcodes.includes(barcodeToUse)) {
+                        this.scannedBarcodes.push(barcodeToUse);
+                        addedCount++;
+                    } else {
+                        duplicateCount++;
+                    }
+                });
+                
+                if (addedCount > 0) {
+                    this.updateScannedCount();
+                    
+                    // Tampilkan tombol hasil jika ada item
+                    document.getElementById('show-results').style.display = 'block';
+                    
+                    let msg = `Berhasil menambahkan ${addedCount} item.`;
+                    if (duplicateCount > 0) msg += ` (${duplicateCount} duplikat diabaikan).`;
+                    
+                    this.showMessage(msg, 'success');
+                    inputEl.value = ''; // Kosongkan input setelah berhasil diproses
+                } else if (duplicateCount > 0) {
+                    this.showMessage(`Semua ${duplicateCount} item yang diinput sudah ada di daftar`, 'error');
+                }
             }
 
             async startScanner() {
