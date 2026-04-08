@@ -470,9 +470,9 @@
     <div id="modal" class="modal">
         <div class="modal-content">
             <h3>⚠️ Konfirmasi</h3>
-            <p>Apakah Anda yakin ingin membatalkan semua scan?</p>
+            <p>Apakah Anda yakin ingin membatalkan semua scan? (Data akan terhapus secara permanen)</p>
             <div class="modal-buttons">
-                <button class="btn btn-secondary" id="confirm-cancel">Ya, Batal</button>
+                <button class="btn btn-secondary" id="confirm-cancel">Ya, Hapus Semua</button>
                 <button class="btn btn-primary" id="keep-scanning">Tidak</button>
             </div>
         </div>
@@ -481,7 +481,10 @@
     <script>
         class BarcodeScanner {
             constructor() {
-                this.scannedBarcodes = [];
+                // MENGAMBIL DATA DARI LOCAL STORAGE (JIKA ADA)
+                const savedData = localStorage.getItem('wahyu_scanned_barcodes');
+                this.scannedBarcodes = savedData ? JSON.parse(savedData) : [];
+                
                 this.products = [];
                 this.barcodeIndex = {};
                 this.pluIndex = {};
@@ -497,6 +500,8 @@
 
             init() {
                 this.bindEvents();
+                // Update UI di awal untuk menampilkan jumlah data tersimpan
+                this.updateScannedCount(); 
             }
 
             async loadProductDataCSV() {
@@ -539,7 +544,6 @@
                     // Format: |PLU|BARCODE|TRF...
                     const parts = line.split('|');
                     
-                    // Pastikan panjang bagian memenuhi syarat index PLU dan Barcode (Index 1 dan 2)
                     if (parts.length >= 3) {
                         const plu = parts[1].trim();
                         const barcode = parts[2].trim();
@@ -548,7 +552,7 @@
                             const product = { 
                                 PLU: plu, 
                                 BARCODE: barcode,
-                                NAMA_PRODUK: `Item PLU: ${plu}` // Karena tidak ada kolom nama produk di CSV
+                                NAMA_PRODUK: `Item PLU: ${plu}` 
                             };
                             
                             this.products.push(product);
@@ -557,7 +561,12 @@
                         }
                     }
                 }
-                this.showMessage(`Database siap: ${Object.keys(this.pluIndex).length} PLU dimuat`, 'success');
+                
+                let dbMsg = `Database siap: ${Object.keys(this.pluIndex).length} PLU dimuat.`;
+                if(this.scannedBarcodes.length > 0) {
+                    dbMsg += ` Sesi sebelumnya dipulihkan.`;
+                }
+                this.showMessage(dbMsg, 'success');
             }
 
             bindEvents() {
@@ -627,8 +636,6 @@
                 
                 if (addedCount > 0) {
                     this.updateScannedCount();
-                    document.getElementById('show-results').style.display = 'block';
-                    
                     let msg = `Berhasil tambah ${addedCount} item valid.`;
                     if (duplicateCount > 0) msg += ` (${duplicateCount} duplikat).`;
                     if (notFoundCount > 0) msg += ` (${notFoundCount} tidak ada di CSV).`;
@@ -749,8 +756,16 @@
             }
 
             updateScannedCount() {
+                // UPDATE UI
                 document.getElementById('scanned-count').textContent = this.scannedBarcodes.length;
-                document.getElementById('save-results').disabled = this.scannedBarcodes.length === 0;
+                
+                // Atur tombol berdasarkan jumlah scan
+                const hasData = this.scannedBarcodes.length > 0;
+                document.getElementById('save-results').disabled = !hasData;
+                document.getElementById('show-results').style.display = hasData ? 'block' : 'none';
+
+                // AUTO-SAVE KE LOCAL STORAGE
+                localStorage.setItem('wahyu_scanned_barcodes', JSON.stringify(this.scannedBarcodes));
             }
 
             saveResults() {
@@ -770,11 +785,11 @@
 
             confirmCancel() {
                 this.scannedBarcodes = [];
-                this.updateScannedCount();
+                this.updateScannedCount(); // Ini otomatis akan menghapus data di local storage juga
                 this.stopScanner();
                 document.getElementById('show-results').style.display = 'none';
                 this.hideCancelModal();
-                this.showMessage('Semua scan dibatalkan', 'error');
+                this.showMessage('Semua data scan berhasil dihapus', 'error');
             }
 
             showResults() {
@@ -931,4 +946,4 @@
         });
     </script>
 </body>
-</html>
+                    </html>
