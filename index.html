@@ -311,6 +311,7 @@
             margin: 15px 0;
             border-radius: 10px;
             font-weight: bold;
+            word-wrap: break-word;
         }
 
         .success {
@@ -336,7 +337,7 @@
             display: block;
         }
 
-        /* Tambahan CSS untuk Input Manual */
+        /* CSS Input Manual */
         .manual-input-container {
             margin-top: 15px;
             border-top: 2px dashed #eee;
@@ -376,11 +377,9 @@
             .container {
                 padding: 10px;
             }
-            
             .controls {
                 flex-direction: column;
             }
-            
             .modal-buttons {
                 flex-direction: column;
             }
@@ -404,14 +403,14 @@
             <div class="camera_error_popup" id="camera-error">
                 <div class="popup_heading">
                     <span>Izinkan Akses Kamera</span>
-                    <span>Jangan khawatir jika Anda lupa mengizinkan akses kamera, ikuti langkah-langkah berikut untuk mengizinkan kamera.</span>
+                    <span>Ikuti langkah-langkah di browser Anda untuk mengizinkan kamera.</span>
                 </div>
             </div>
             
             <div class="status-message" id="status-message" style="display: none;"></div>
             
             <div class="scanned-count">
-                Barang terscan: <span class="count" id="scanned-count">0</span>
+                Barang valid tersimpan: <span class="count" id="scanned-count">0</span>
             </div>
 
             <div class="controls">
@@ -440,7 +439,7 @@
 
             <div class="manual-input-container">
                 <h3>📝 Input Manual PLU / Barcode</h3>
-                <textarea id="manual-input" rows="4" placeholder="Contoh: 10003557, 20091271&#10;Bisa dipisah dengan koma, titik, spasi, atau enter..."></textarea>
+                <textarea id="manual-input" rows="4" placeholder="Contoh: 10003557, 20091271&#10;Hanya PLU/Barcode yang ada di BARCODE.CSV yang akan tersimpan..."></textarea>
                 <button class="btn btn-primary" id="process-manual" style="width: 100%; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);">
                     ➕ Tambahkan ke Daftar
                 </button>
@@ -484,6 +483,8 @@
             constructor() {
                 this.scannedBarcodes = [];
                 this.products = [];
+                this.barcodeIndex = {};
+                this.pluIndex = {};
                 this.currentPage = 0;
                 this.productsPerPage = 1;
                 this.isScanning = false;
@@ -491,68 +492,72 @@
                 this.scanCooldown = false;
                 
                 this.init();
-                this.loadProductData();
+                this.loadProductDataCSV();
             }
 
             init() {
                 this.bindEvents();
             }
 
-            async loadProductData() {
+            async loadProductDataCSV() {
                 try {
-                    this.showMessage('Memuat data produk...', 'success');
+                    this.showMessage('Memuat database BARCODE.CSV...', 'success');
                     
-                    const response = await fetch('./bcd.json');
+                    const response = await fetch('./BARCODE.CSV');
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
                     
-                    this.products = await response.json();
-                    
-                    // Validasi data
-                    if (!Array.isArray(this.products)) {
-                        throw new Error('Format data JSON tidak valid');
-                    }
-                    
-                    // Buat index barcode & PLU untuk pencarian cepat
-                    this.barcodeIndex = {};
-                    this.pluIndex = {};
-                    this.products.forEach(product => {
-                        if (product.BARCODE) {
-                            this.barcodeIndex[product.BARCODE] = product;
-                        }
-                        if (product.PLU) {
-                            this.pluIndex[product.PLU] = product;
-                        }
-                    });
-                    
-                    this.showMessage(`Data produk berhasil dimuat: ${this.products.length} item`, 'success');
-                    console.log(`Loaded ${this.products.length} products from bcd.json`);
+                    const csvText = await response.text();
+                    this.parseCSV(csvText);
                     
                 } catch (error) {
-                    console.error('Error loading product data:', error);
-                    this.showMessage(`Gagal memuat bcd.json: ${error.message}`, 'error');
+                    console.error('Error loading CSV:', error);
+                    this.showMessage(`Gagal memuat BARCODE.CSV. Menggunakan data sample.`, 'error');
                     
-                    // Fallback ke data sample jika file tidak ditemukan
-                    this.products = [
-                        {"PLU": "10000019", "NAMA_PRODUK": "INDOMILK,SUSU KENTAL MANIS PUTIH 370g KLG", "BARCODE": "8992702000018"},
-                        {"PLU": "10000020", "NAMA_PRODUK": "INDOMILK,SUSU KENTAL MANIS CHOCOLATE 370g KLG", "BARCODE": "8992702000063"},
-                        {"PLU": "10000021", "NAMA_PRODUK": "CAP ENAK,KENTAL MANIS PUTIH 370g KLG", "BARCODE": "8992702000025"}
-                    ];
-                    
-                    this.barcodeIndex = {};
-                    this.pluIndex = {};
-                    this.products.forEach(product => {
-                        if (product.BARCODE) {
-                            this.barcodeIndex[product.BARCODE] = product;
-                        }
-                        if (product.PLU) {
-                            this.pluIndex[product.PLU] = product;
-                        }
-                    });
-                    
-                    this.showMessage('Menggunakan data sample karena bcd.json tidak ditemukan', 'error');
+                    // Fallback Dummy Data jika CSV tidak ditemukan
+                    const sampleCSV = `
+|10000019|8992702000018|TRF|03/06/2019
+|10000020|8992702000063|TRF|03/06/2019
+|10000021|8992702000025|TRF|03/06/2019
+                    `;
+                    this.parseCSV(sampleCSV);
                 }
+            }
+
+            parseCSV(text) {
+                this.products = [];
+                this.barcodeIndex = {};
+                this.pluIndex = {};
+                
+                const lines = text.split('\n');
+                
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line) continue;
+                    
+                    // Format: |PLU|BARCODE|TRF...
+                    const parts = line.split('|');
+                    
+                    // Pastikan panjang bagian memenuhi syarat index PLU dan Barcode (Index 1 dan 2)
+                    if (parts.length >= 3) {
+                        const plu = parts[1].trim();
+                        const barcode = parts[2].trim();
+                        
+                        if (plu && barcode) {
+                            const product = { 
+                                PLU: plu, 
+                                BARCODE: barcode,
+                                NAMA_PRODUK: `Item PLU: ${plu}` // Karena tidak ada kolom nama produk di CSV
+                            };
+                            
+                            this.products.push(product);
+                            this.barcodeIndex[barcode] = product;
+                            this.pluIndex[plu] = product;
+                        }
+                    }
+                }
+                this.showMessage(`Database siap: ${Object.keys(this.pluIndex).length} PLU dimuat`, 'success');
             }
 
             bindEvents() {
@@ -563,7 +568,7 @@
                 document.getElementById('show-results').addEventListener('click', () => this.showResults());
                 document.getElementById('back-to-scanner').addEventListener('click', () => this.backToScanner());
                 
-                // Event listener untuk tombol input manual
+                // Event Input Manual
                 document.getElementById('process-manual').addEventListener('click', () => this.processManualInput());
                 
                 document.getElementById('confirm-cancel').addEventListener('click', () => this.confirmCancel());
@@ -583,8 +588,7 @@
                 const inputEl = document.getElementById('manual-input');
                 const text = inputEl.value;
                 
-                // Gunakan Regex \d+ untuk mengambil SEMUA kumpulan angka, 
-                // otomatis mengabaikan koma, spasi, titik, huruf, atau enter
+                // Regex mencari semua kumpulan angka
                 const codes = text.match(/\d+/g);
                 
                 if (!codes || codes.length === 0) {
@@ -594,49 +598,59 @@
                 
                 let addedCount = 0;
                 let duplicateCount = 0;
+                let notFoundCount = 0;
                 
                 codes.forEach(code => {
+                    let isValid = false;
                     let barcodeToUse = code;
                     
-                    // Cek apakah angka yang diinput adalah PLU, jika iya, ambil barcodenya
-                    if (this.pluIndex && this.pluIndex[code] && this.pluIndex[code].BARCODE) {
+                    // VALIDASI: Apakah code ada di index PLU atau Barcode CSV?
+                    if (this.pluIndex[code]) {
+                        isValid = true;
                         barcodeToUse = this.pluIndex[code].BARCODE;
+                    } else if (this.barcodeIndex[code]) {
+                        isValid = true;
+                        barcodeToUse = code;
                     }
                     
-                    // Cek apakah sudah pernah discan/diinput
-                    if (!this.scannedBarcodes.includes(barcodeToUse)) {
-                        this.scannedBarcodes.push(barcodeToUse);
-                        addedCount++;
+                    if (isValid) {
+                        if (!this.scannedBarcodes.includes(barcodeToUse)) {
+                            this.scannedBarcodes.push(barcodeToUse);
+                            addedCount++;
+                        } else {
+                            duplicateCount++;
+                        }
                     } else {
-                        duplicateCount++;
+                        notFoundCount++;
                     }
                 });
                 
                 if (addedCount > 0) {
                     this.updateScannedCount();
-                    
-                    // Tampilkan tombol hasil jika ada item
                     document.getElementById('show-results').style.display = 'block';
                     
-                    let msg = `Berhasil menambahkan ${addedCount} item.`;
-                    if (duplicateCount > 0) msg += ` (${duplicateCount} duplikat diabaikan).`;
+                    let msg = `Berhasil tambah ${addedCount} item valid.`;
+                    if (duplicateCount > 0) msg += ` (${duplicateCount} duplikat).`;
+                    if (notFoundCount > 0) msg += ` (${notFoundCount} tidak ada di CSV).`;
                     
                     this.showMessage(msg, 'success');
-                    inputEl.value = ''; // Kosongkan input setelah berhasil diproses
-                } else if (duplicateCount > 0) {
-                    this.showMessage(`Semua ${duplicateCount} item yang diinput sudah ada di daftar`, 'error');
+                    inputEl.value = ''; // Kosongkan
+                } else {
+                    if (notFoundCount > 0) {
+                        this.showMessage(`${notFoundCount} item ditolak (tidak ditemukan di BARCODE.CSV)`, 'error');
+                    } else if (duplicateCount > 0) {
+                        this.showMessage(`Semua item yang diinput sudah ada di daftar`, 'error');
+                    }
                 }
             }
 
             async startScanner() {
                 try {
-                    // Clear any existing scanner
                     if (this.html5QrcodeScanner) {
                         await this.html5QrcodeScanner.stop();
                         this.html5QrcodeScanner.clear();
                     }
 
-                    // Initialize new scanner with optimized settings
                     this.html5QrcodeScanner = new Html5Qrcode("scanner");
                     
                     const config = {
@@ -645,9 +659,7 @@
                         aspectRatio: 1.5,
                         showTorchButtonIfSupported: true,
                         showZoomSliderIfSupported: true,
-                        defaultZoomValueIfSupported: 2,
-                        disableFlip: false,
-                        rememberLastUsedCamera: true
+                        defaultZoomValueIfSupported: 2
                     };
 
                     await this.html5QrcodeScanner.start(
@@ -656,9 +668,7 @@
                         (decodedText, decodedResult) => {
                             this.onBarcodeDetected(decodedText);
                         },
-                        (errorMessage) => {
-                            // Handle scan errors silently - this is normal during scanning
-                        }
+                        (errorMessage) => {}
                     );
 
                     this.isScanning = true;
@@ -681,48 +691,45 @@
                         await this.html5QrcodeScanner.stop();
                         this.html5QrcodeScanner.clear();
                         this.html5QrcodeScanner = null;
-                    } catch (error) {
-                        console.error('Error stopping scanner:', error);
-                    }
+                    } catch (error) {}
                     
                     this.isScanning = false;
                     document.getElementById('start-scanner').disabled = false;
                     document.getElementById('stop-scanner').disabled = true;
-                    
-                    this.showMessage('Scanner berhenti', 'error');
                 }
             }
 
             onBarcodeDetected(barcode) {
                 if (this.scanCooldown) return;
                 
-                // Set cooldown to prevent multiple scans of the same barcode
                 this.scanCooldown = true;
-                setTimeout(() => {
-                    this.scanCooldown = false;
-                }, 1500); // Shorter cooldown for better responsiveness
+                setTimeout(() => { this.scanCooldown = false; }, 1500); 
                 
-                // Check if barcode was already scanned
-                if (!this.scannedBarcodes.includes(barcode)) {
-                    this.scannedBarcodes.push(barcode);
-                    this.updateScannedCount();
-                    this.showMessage(`Barcode berhasil discan: ${barcode}`, 'success');
+                // VALIDASI SCAN KEMERA: Harus ada di CSV
+                if (this.barcodeIndex[barcode] || this.pluIndex[barcode]) {
                     
-                    // Vibrate if available
-                    if ('vibrate' in navigator) {
-                        navigator.vibrate(200);
+                    let barcodeToUse = barcode;
+                    if (this.pluIndex[barcode]) {
+                        barcodeToUse = this.pluIndex[barcode].BARCODE;
                     }
-                    
-                    // Audio feedback (optional)
-                    this.playBeep();
+
+                    if (!this.scannedBarcodes.includes(barcodeToUse)) {
+                        this.scannedBarcodes.push(barcodeToUse);
+                        this.updateScannedCount();
+                        this.showMessage(`Valid & Disimpan: ${barcodeToUse}`, 'success');
+                        
+                        if ('vibrate' in navigator) navigator.vibrate(200);
+                        this.playBeep();
+                    } else {
+                        this.showMessage(`Duplikat: Barcode ${barcodeToUse} sudah discan`, 'error');
+                    }
                 } else {
-                    this.showMessage(`Barcode ${barcode} sudah pernah discan`, 'error');
+                    this.showMessage(`Ditolak: ${barcode} tidak ada di BARCODE.CSV`, 'error');
                 }
             }
 
             playBeep() {
                 try {
-                    // Create a simple beep sound
                     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     const oscillator = audioContext.createOscillator();
                     const gainNode = audioContext.createGain();
@@ -738,9 +745,7 @@
                     
                     oscillator.start(audioContext.currentTime);
                     oscillator.stop(audioContext.currentTime + 0.1);
-                } catch (error) {
-                    // Audio not supported or allowed
-                }
+                } catch (error) {}
             }
 
             updateScannedCount() {
@@ -749,14 +754,10 @@
             }
 
             saveResults() {
-                if (this.scannedBarcodes.length === 0) {
-                    this.showMessage('Tidak ada barcode yang discan', 'error');
-                    return;
-                }
-                
+                if (this.scannedBarcodes.length === 0) return;
                 this.stopScanner();
                 document.getElementById('show-results').style.display = 'block';
-                this.showMessage(`${this.scannedBarcodes.length} barcode berhasil disimpan`, 'success');
+                this.showMessage(`${this.scannedBarcodes.length} item berhasil disimpan`, 'success');
             }
 
             showCancelModal() {
@@ -777,10 +778,7 @@
             }
 
             showResults() {
-                if (this.scannedBarcodes.length === 0) {
-                    this.showMessage('Tidak ada hasil untuk ditampilkan', 'error');
-                    return;
-                }
+                if (this.scannedBarcodes.length === 0) return;
                 
                 document.getElementById('scanner-section').style.display = 'none';
                 document.getElementById('results-section').style.display = 'block';
@@ -806,9 +804,7 @@
                 for (let i = startIndex; i < endIndex; i++) {
                     const barcode = this.scannedBarcodes[i];
                     const product = this.barcodeIndex[barcode];
-                    
-                    const productCard = this.createProductCard(barcode, product);
-                    container.appendChild(productCard);
+                    container.appendChild(this.createProductCard(barcode, product));
                 }
                 
                 this.updatePagination();
@@ -818,11 +814,9 @@
                 const card = document.createElement('div');
                 card.className = 'product-card';
                 
-                const plu = product ? product.PLU : 'Tidak ditemukan';
-                const productName = product ? product.NAMA_PRODUK : `Produk dengan barcode ${barcode} tidak ditemukan dalam database`;
+                const plu = product ? product.PLU : 'N/A';
+                const productName = product ? product.NAMA_PRODUK : `Produk Tidak Diketahui`;
                 const imageUrl = product ? `https://cdn-klik.klikindomaret.com/klik-catalog/product/${product.PLU}_1.jpg` : '';
-                
-                // Create unique ID for this barcode
                 const barcodeId = `barcode-${barcode}-${Date.now()}`;
                 
                 card.innerHTML = `
@@ -840,7 +834,6 @@
                     </div>
                 `;
                 
-                // Generate barcode after element is added to DOM
                 setTimeout(() => {
                     this.generateBarcode(barcodeId, barcode);
                 }, 100);
@@ -852,80 +845,44 @@
                 try {
                     const canvas = document.getElementById(canvasId);
                     const fallback = document.getElementById(`fallback-${canvasId}`);
-                    
-                    if (!canvas) {
-                        console.error('Canvas element not found:', canvasId);
-                        return;
+                    if (!canvas) return;
+
+                    const formats = ["EAN13", "CODE128"];
+                    let success = false;
+
+                    for (let format of formats) {
+                        try {
+                            JsBarcode(canvas, barcode, {
+                                format: format,
+                                width: 2, height: 80,
+                                displayValue: true, fontSize: 16, margin: 10,
+                                background: "#ffffff", lineColor: "#000000"
+                            });
+                            success = true;
+                            break;
+                        } catch (e) {}
                     }
 
-                    // First try EAN13
-                    try {
-                        JsBarcode(canvas, barcode, {
-                            format: "EAN13",
-                            width: 2,
-                            height: 80,
-                            displayValue: true,
-                            fontSize: 16,
-                            margin: 10,
-                            background: "#ffffff",
-                            lineColor: "#000000"
-                        });
+                    if (!success) {
+                        try {
+                            JsBarcode(canvas, barcode, {
+                                width: 2, height: 80,
+                                displayValue: true, fontSize: 16, margin: 10
+                            });
+                            success = true;
+                        } catch (e) {}
+                    }
+
+                    if (success) {
                         canvas.style.display = 'block';
                         if (fallback) fallback.style.display = 'none';
-                        return;
-                    } catch (error) {
-                        console.log('EAN13 failed, trying CODE128:', error);
+                    } else {
+                        canvas.style.display = 'none';
+                        if (fallback) fallback.style.display = 'block';
                     }
-
-                    // Then try CODE128
-                    try {
-                        JsBarcode(canvas, barcode, {
-                            format: "CODE128",
-                            width: 2,
-                            height: 80,
-                            displayValue: true,
-                            fontSize: 16,
-                            margin: 10,
-                            background: "#ffffff",
-                            lineColor: "#000000"
-                        });
-                        canvas.style.display = 'block';
-                        if (fallback) fallback.style.display = 'none';
-                        return;
-                    } catch (error) {
-                        console.log('CODE128 failed, trying AUTO:', error);
-                    }
-
-                    // Finally try AUTO format
-                    try {
-                        JsBarcode(canvas, barcode, {
-                            width: 2,
-                            height: 80,
-                            displayValue: true,
-                            fontSize: 16,
-                            margin: 10,
-                            background: "#ffffff",
-                            lineColor: "#000000"
-                        });
-                        canvas.style.display = 'block';
-                        if (fallback) fallback.style.display = 'none';
-                        return;
-                    } catch (error) {
-                        console.log('All barcode formats failed, showing fallback:', error);
-                    }
-
-                    // If all fails, show fallback
-                    canvas.style.display = 'none';
-                    if (fallback) {
-                        fallback.style.display = 'block';
-                    }
-
                 } catch (error) {
-                    console.error('Error generating barcode:', error);
                     const fallback = document.getElementById(`fallback-${canvasId}`);
-                    if (fallback) {
-                        fallback.style.display = 'block';
-                    }
+                    if (fallback) fallback.style.display = 'block';
                 }
             }
 
@@ -965,11 +922,10 @@
                 
                 setTimeout(() => {
                     statusElement.style.display = 'none';
-                }, 3000);
+                }, 4000);
             }
         }
 
-        // Initialize app when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
             new BarcodeScanner();
         });
